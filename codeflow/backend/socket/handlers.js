@@ -5,13 +5,10 @@ const path = require('path');
 const JWT_SECRET = process.env.JWT_SECRET || 'codeflow-secret-key-change-in-production';
 const WORKSPACES_DIR = path.join(__dirname, '../../workspaces');
 
-// Track active users per server
-const activeUsers = new Map(); // serverId -> Map(socketId -> userInfo)
-// Track auto-save timers
-const autoSaveTimers = new Map(); // `${serverId}:${filePath}` -> timer
+const activeUsers = new Map();
+const autoSaveTimers = new Map();
 
 function setupSocketHandlers(io) {
-  // Auth middleware
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('Authentication required'));
@@ -27,7 +24,6 @@ function setupSocketHandlers(io) {
   io.on('connection', (socket) => {
     console.log(`🔌 ${socket.user.email} connected`);
 
-    // Join a server workspace
     socket.on('join-server', ({ serverId }) => {
       socket.join(`server:${serverId}`);
       socket.currentServer = serverId;
@@ -43,12 +39,13 @@ function setupSocketHandlers(io) {
         currentFile: null
       });
 
-      // Notify all in room
       const users = Array.from(activeUsers.get(serverId).values());
       io.to(`server:${serverId}`).emit('users-update', users);
+
+      // Send current tree to newly joined user immediately
+      socket.emit('tree-changed', { serverId });
     });
 
-    // User opened a file
     socket.on('open-file', ({ serverId, filePath }) => {
       if (activeUsers.has(serverId) && activeUsers.get(serverId).has(socket.id)) {
         activeUsers.get(serverId).get(socket.id).currentFile = filePath;
@@ -57,7 +54,6 @@ function setupSocketHandlers(io) {
       }
     });
 
-    // Real-time code change (broadcast to others in same server)
     socket.on('code-change', ({ serverId, filePath, content, cursorPosition }) => {
       socket.to(`server:${serverId}`).emit('code-change', {
         filePath,
@@ -70,16 +66,14 @@ function setupSocketHandlers(io) {
         }
       });
 
-      // Schedule auto-save (1 minute debounce)
       const key = `${serverId}:${filePath}`;
-      if (autoSaveTimers.has(key)) {
-        clearTimeout(autoSaveTimers.get(key));
-      }
+      if (autoSaveTimers.has(key)) clearTimeout(autoSaveTimers.get(key));
+
       const timer = setTimeout(async () => {
         try {
           const workspaceDir = path.join(WORKSPACES_DIR, serverId);
           const fullPath = path.join(workspaceDir, filePath);
-          if (!fullPath.startsWith(workspaceDir)) return; // security
+          if (!fullPath.startsWith(workspaceDir)) return;
           await fs.ensureDir(path.dirname(fullPath));
           await fs.writeFile(fullPath, content, 'utf-8');
           io.to(`server:${serverId}`).emit('file-autosaved', { filePath, savedAt: new Date().toISOString() });
@@ -87,12 +81,11 @@ function setupSocketHandlers(io) {
           console.error('Auto-save error:', err);
         }
         autoSaveTimers.delete(key);
-      }, 60000); // 1 minute
+      }, 60000);
 
       autoSaveTimers.set(key, timer);
     });
 
-    // Manual save
     socket.on('save-file', async ({ serverId, filePath, content }) => {
       try {
         const workspaceDir = path.join(WORKSPACES_DIR, serverId);
@@ -101,7 +94,6 @@ function setupSocketHandlers(io) {
         await fs.ensureDir(path.dirname(fullPath));
         await fs.writeFile(fullPath, content, 'utf-8');
 
-        // Cancel pending auto-save
         const key = `${serverId}:${filePath}`;
         if (autoSaveTimers.has(key)) {
           clearTimeout(autoSaveTimers.get(key));
@@ -118,20 +110,24 @@ function setupSocketHandlers(io) {
       }
     });
 
-    // Cursor position broadcast
-    socket.on('cursor-move', ({ serverId, filePath, line, column }) => {
-      socket.to(`server:${serverId}`).emit('cursor-move', {
+    // Typing / cursor indicator — broadcast to everyone else
+    socket.on('typing', ({ serverId, filePath, line, column }) => {
+      socket.to(`server:${serverId}`).emit('typing', {
         filePath, line, column,
-        user: { email: socket.user.email, name: socket.user.name, color: getUserColor(socket.user.email) }
+        user: {
+          id: socket.user.id,
+          email: socket.user.email,
+          name: socket.user.name,
+          color: getUserColor(socket.user.email)
+        }
       });
     });
 
-    // File tree change notification
+    // File tree change — broadcast to ALL including sender so everyone refreshes
     socket.on('tree-changed', ({ serverId }) => {
-      socket.to(`server:${serverId}`).emit('tree-changed', { serverId });
+      io.to(`server:${serverId}`).emit('tree-changed', { serverId });
     });
 
-    // Chat message within server
     socket.on('chat-message', ({ serverId, message }) => {
       io.to(`server:${serverId}`).emit('chat-message', {
         message,
@@ -140,7 +136,6 @@ function setupSocketHandlers(io) {
       });
     });
 
-    // Disconnect
     socket.on('disconnect', () => {
       console.log(`🔌 ${socket.user.email} disconnected`);
       if (socket.currentServer && activeUsers.has(socket.currentServer)) {
@@ -153,7 +148,6 @@ function setupSocketHandlers(io) {
   });
 }
 
-// Consistent color per user
 function getUserColor(email) {
   const colors = ['#cba6f7', '#89b4fa', '#a6e3a1', '#fab387', '#f38ba8', '#94e2d5', '#f9e2af', '#89dceb'];
   let hash = 0;

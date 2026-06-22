@@ -139,7 +139,7 @@ function initMonaco() {
       monacoEditor.onDidChangeCursorPosition((e) => {
         document.getElementById('status-cursor').textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
         if (socket && currentServerId && activeTab) {
-          socket.emit('cursor-move', {
+          socket.emit('typing', {
             serverId: currentServerId,
             filePath: activeTab,
             line: e.position.lineNumber,

@@ -1,4 +1,5 @@
 let socket = null;
+const remoteTypingTimeouts = new Map(); // userId -> timeout
 
 function initSocket() {
   socket = io({ auth: { token: API.getToken() } });
@@ -17,13 +18,13 @@ function initSocket() {
   // Real-time code updates from other users
   socket.on('code-change', ({ filePath, content, user }) => {
     applyRemoteChange(filePath, content);
-    // Show subtle indicator
-    showRemoteCursorIndicator(user);
+    showTypingBadge(user, filePath);
   });
 
-  // Cursor positions of other users
-  socket.on('cursor-move', ({ filePath, line, column, user }) => {
-    // Could render remote cursors in editor - basic version just shows in status
+  // Typing indicator from other users
+  socket.on('typing', ({ filePath, line, column, user }) => {
+    showTypingBadge(user, filePath);
+    renderRemoteCursor(user, filePath, line, column);
   });
 
   // Users in this workspace
@@ -48,7 +49,7 @@ function initSocket() {
     }
   });
 
-  // File tree changed by someone else
+  // File tree changed — reload tree for everyone
   socket.on('tree-changed', () => {
     if (currentServerId) loadFileTree(currentServerId);
   });
@@ -59,6 +60,78 @@ function initSocket() {
   });
 }
 
+// Show who is typing in the status bar
+function showTypingBadge(user, filePath) {
+  const key = user.id || user.email;
+  if (remoteTypingTimeouts.has(key)) clearTimeout(remoteTypingTimeouts.get(key));
+
+  const el = document.getElementById('save-status');
+  el.textContent = `✏️ ${user.name || user.email.split('@')[0]} is editing ${filePath ? filePath.split('/').pop() : ''}...`;
+  el.style.color = user.color;
+
+  const t = setTimeout(() => {
+    el.style.color = '';
+    const modified = activeTab && openTabs.get(activeTab)?.modified;
+    setSaveStatus(modified ? 'unsaved' : 'saved');
+    remoteTypingTimeouts.delete(key);
+  }, 2000);
+
+  remoteTypingTimeouts.set(key, t);
+}
+
+// Render a remote cursor decoration in Monaco
+const remoteDecorations = new Map(); // userId -> decorationIds[]
+
+function renderRemoteCursor(user, filePath, line, column) {
+  if (!monacoEditor || activeTab !== filePath) return;
+
+  const key = user.id || user.email;
+  const color = user.color || '#cba6f7';
+
+  // Remove old decoration
+  if (remoteDecorations.has(key)) {
+    monacoEditor.deltaDecorations(remoteDecorations.get(key), []);
+  }
+
+  // Add new cursor + line highlight decoration
+  const decorations = monacoEditor.deltaDecorations([], [
+    {
+      range: new monaco.Range(line, column, line, column + 1),
+      options: {
+        className: `remote-cursor-${key.replace(/[^a-z0-9]/gi, '')}`,
+        beforeContentClassName: `remote-cursor-before`,
+        hoverMessage: { value: `**${user.name || user.email}**` },
+        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        afterContentClassName: `remote-cursor-label`,
+        glyphMarginClassName: 'remote-cursor-glyph',
+        isWholeLine: false,
+        overviewRuler: { color, position: monaco.editor.OverviewRulerLane.Right }
+      }
+    }
+  ]);
+
+  remoteDecorations.set(key, decorations);
+
+  // Inject dynamic CSS for this user's cursor color
+  const styleId = `cursor-style-${key.replace(/[^a-z0-9]/gi, '')}`;
+  if (!document.getElementById(styleId)) {
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .remote-cursor-before { border-left: 2px solid ${color}; margin-left: -1px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Auto-clear after 5 seconds of no movement
+  setTimeout(() => {
+    if (remoteDecorations.has(key)) {
+      monacoEditor.deltaDecorations(remoteDecorations.get(key), []);
+      remoteDecorations.delete(key);
+    }
+  }, 5000);
+}
+
 function renderActiveUsers(users) {
   const container = document.getElementById('active-users');
   container.innerHTML = '';
@@ -67,22 +140,9 @@ function renderActiveUsers(users) {
     avatar.className = 'user-avatar';
     avatar.style.background = user.color;
     avatar.textContent = (user.name || user.email).charAt(0).toUpperCase();
-    avatar.title = user.name || user.email;
-    avatar.setAttribute('data-tooltip', user.name || user.email);
+    avatar.title = `${user.name || user.email}${user.currentFile ? ' — ' + user.currentFile.split('/').pop() : ''}`;
     container.appendChild(avatar);
   });
-}
-
-let remoteIndicatorTimeout;
-function showRemoteCursorIndicator(user) {
-  const el = document.getElementById('save-status');
-  el.textContent = `${user.name || user.email.split('@')[0]} is editing...`;
-  clearTimeout(remoteIndicatorTimeout);
-  remoteIndicatorTimeout = setTimeout(() => {
-    if (!activeTab) return;
-    const modified = openTabs.get(activeTab)?.modified;
-    setSaveStatus(modified ? 'unsaved' : 'saved');
-  }, 2000);
 }
 
 // Chat

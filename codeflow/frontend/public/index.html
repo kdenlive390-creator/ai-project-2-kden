@@ -107,7 +107,7 @@
           <span id="save-status" class="save-status">All changes saved</span>
         </div>
         <div class="titlebar-center">
-          <button class="tb-btn" onclick="toggleLivePreview()" title="Live Server Preview" id="preview-toggle-btn">▶ Live Preview</button>
+          <button class="tb-btn" onclick="toggleLivePreview()" title="Live Server Preview" id="preview-toggle-btn">🌐 Open Preview</button>
           <button class="tb-btn" onclick="saveCurrentFile()" title="Save (Ctrl+S)">💾 Save</button>
         </div>
         <div class="titlebar-right">
@@ -171,21 +171,7 @@
           </div>
         </div>
 
-        <!-- Live Preview Panel -->
-        <div id="preview-panel" class="preview-panel hidden">
-          <div class="preview-header">
-            <span>🌐 Live Preview</span>
-            <div class="preview-controls">
-              <button onclick="refreshPreview()" title="Refresh">↻</button>
-              <button onclick="openPreviewExternal()" title="Open in new tab">⤢</button>
-              <button onclick="toggleLivePreview()" title="Close">✕</button>
-            </div>
-          </div>
-          <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
-        </div>
-      </div>
-
-      <!-- Chat Panel -->
+        <!-- Chat Panel -->
       <div id="chat-panel" class="chat-panel hidden">
         <div class="chat-header">
           <span>Team Chat</span>
