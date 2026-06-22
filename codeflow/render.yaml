@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: codeflow-ide
+    env: node
+    buildCommand: npm install
+    startCommand: node backend/server.js
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PORT
+        value: 3000

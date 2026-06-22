@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeFlow IDE</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/icons.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- AUTH -->
+  <div id="auth-screen" class="screen">
+    <div class="auth-container">
+      <div class="auth-logo"><span class="logo-icon">⚡</span><span class="logo-text">CodeFlow</span></div>
+      <p class="auth-tagline">Collaborative IDE in your browser</p>
+      <div class="auth-tabs">
+        <button class="auth-tab active" onclick="switchTab('login')">Sign In</button>
+        <button class="auth-tab" onclick="switchTab('register')">Create Account</button>
+      </div>
+      <div id="login-form" class="auth-form">
+        <input type="email" id="login-email" placeholder="Email" class="auth-input" />
+        <input type="password" id="login-password" placeholder="Password" class="auth-input" />
+        <button class="auth-btn" onclick="login()">Sign In</button>
+      </div>
+      <div id="register-form" class="auth-form hidden">
+        <input type="text" id="reg-name" placeholder="Full Name" class="auth-input" />
+        <input type="email" id="reg-email" placeholder="Email" class="auth-input" />
+        <input type="password" id="reg-password" placeholder="Password (min 6 chars)" class="auth-input" />
+        <button class="auth-btn" onclick="register()">Create Account</button>
+      </div>
+      <div id="auth-error" class="auth-error hidden"></div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="dashboard-screen" class="screen hidden">
+    <div class="dashboard-header">
+      <div class="dashboard-logo">⚡ CodeFlow</div>
+      <div class="dashboard-user">
+        <span id="dash-username"></span>
+        <button class="icon-btn" onclick="logout()" title="Sign out">⏏</button>
+      </div>
+    </div>
+    <div class="dashboard-body">
+      <div class="dashboard-actions">
+        <button class="dash-btn primary" onclick="showCreateServer()">+ New Workspace</button>
+        <button class="dash-btn secondary" onclick="showJoinServer()">Join via Code</button>
+      </div>
+      <div class="servers-section">
+        <h3 class="section-title">My Workspaces</h3>
+        <div id="owned-servers" class="servers-grid"></div>
+      </div>
+      <div class="servers-section">
+        <h3 class="section-title">Collaborated Workspaces</h3>
+        <div id="collab-servers" class="servers-grid"></div>
+      </div>
+    </div>
+    <div id="create-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3>New Workspace</h3>
+        <input type="text" id="new-server-name" placeholder="Workspace name..." class="modal-input" />
+        <div class="modal-actions">
+          <button class="modal-btn secondary" onclick="closeModal('create-modal')">Cancel</button>
+          <button class="modal-btn primary" onclick="createServer()">Create</button>
+        </div>
+      </div>
+    </div>
+    <div id="join-modal" class="modal hidden">
+      <div class="modal-box">
+        <h3>Join Workspace</h3>
+        <input type="text" id="invite-code-input" placeholder="Enter invite code..." class="modal-input" style="text-transform:uppercase" />
+        <div class="modal-actions">
+          <button class="modal-btn secondary" onclick="closeModal('join-modal')">Cancel</button>
+          <button class="modal-btn primary" onclick="joinServer()">Join</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IDE -->
+  <div id="ide-screen" class="screen hidden">
+    <!-- Titlebar -->
+    <div class="ide-titlebar">
+      <div class="titlebar-left">
+        <button class="icon-btn" onclick="backToDashboard()" title="Dashboard">⌂</button>
+        <span id="ide-server-name" class="server-name-title"></span>
+        <span id="save-status" class="save-status">All changes saved</span>
+      </div>
+      <div class="titlebar-center">
+        <button class="tb-btn" onclick="openPreviewExternal()" title="Open preview in new tab">🌐 Preview</button>
+        <button class="tb-btn" onclick="saveCurrentFile()" title="Save (Ctrl+S)">💾 Save</button>
+        <button class="tb-btn" onclick="toggleTerminal()" title="Toggle Terminal" id="terminal-toggle-btn">⬛ Terminal</button>
+        <button class="tb-btn" onclick="downloadWorkspace()" title="Download project as ZIP">📦 Download</button>
+        <label class="tb-btn" style="cursor:pointer" title="Upload files">
+          📂 Upload
+          <input type="file" id="upload-input" multiple style="display:none" onchange="uploadFiles(this)" />
+        </label>
+      </div>
+      <div class="titlebar-right">
+        <div id="active-users" class="active-users"></div>
+        <button class="icon-btn" onclick="toggleChat()" title="Chat">💬</button>
+        <button class="icon-btn" onclick="showInvitePanel()" title="Invite">🔗</button>
+      </div>
+    </div>
+
+    <div class="ide-body">
+      <!-- Sidebar -->
+      <div class="ide-sidebar" id="ide-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title">EXPLORER</span>
+          <div class="sidebar-actions">
+            <button class="sidebar-icon-btn" onclick="newFile()" title="New File">📄</button>
+            <button class="sidebar-icon-btn" onclick="newFolder()" title="New Folder">📁</button>
+            <button class="sidebar-icon-btn" onclick="refreshTree()" title="Refresh">↻</button>
+          </div>
+        </div>
+        <div id="file-tree" class="file-tree"></div>
+      </div>
+
+      <div class="sidebar-resize" id="sidebar-resize"></div>
+
+      <!-- Main area -->
+      <div class="ide-main" id="ide-main">
+        <!-- Tabs -->
+        <div class="editor-tabs">
+          <div class="tabs-left" id="tabs-container"></div>
+        </div>
+
+        <!-- Editor -->
+        <div id="editor-wrapper">
+          <div id="monaco-editor"></div>
+          <div id="editor-placeholder" class="editor-placeholder">
+            <div class="placeholder-content">
+              <div class="placeholder-icon">⚡</div>
+              <h2>CodeFlow IDE</h2>
+              <p>Select a file from the explorer to start editing</p>
+              <div class="shortcuts">
+                <div class="shortcut"><kbd>Ctrl+S</kbd> Save</div>
+                <div class="shortcut"><kbd>Ctrl+Z</kbd> Undo</div>
+                <div class="shortcut"><kbd>Ctrl+Space</kbd> IntelliSense</div>
+                <div class="shortcut"><kbd>Tab</kbd> Emmet expand</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal -->
+        <div id="terminal-panel" class="terminal-panel hidden">
+          <div class="terminal-header">
+            <span>⬛ TERMINAL</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span id="terminal-status" class="terminal-status">Disconnected</span>
+              <button onclick="clearTerminal()" title="Clear">🗑</button>
+              <button onclick="toggleTerminal()">✕</button>
+            </div>
+          </div>
+          <div id="terminal-output" class="terminal-output"></div>
+          <div class="terminal-input-row">
+            <span class="terminal-prompt">$</span>
+            <input type="text" id="terminal-input" class="terminal-input" placeholder="Type command and press Enter..." autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <!-- Status bar -->
+        <div class="status-bar">
+          <div class="status-left">
+            <span id="status-lang">Plain Text</span>
+            <span id="status-cursor">Ln 1, Col 1</span>
+          </div>
+          <div class="status-right">
+            <span id="status-encoding">UTF-8</span>
+            <span id="status-eol">LF</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Panel -->
+    <div id="chat-panel" class="chat-panel hidden">
+      <div class="chat-header">
+        <span>💬 Team Chat</span>
+        <button onclick="toggleChat()">✕</button>
+      </div>
+      <div id="chat-messages" class="chat-messages"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="Message..." onkeydown="if(event.key==='Enter')sendChat()" />
+        <button onclick="sendChat()">Send</button>
+      </div>
+    </div>
+
+    <!-- Invite Panel -->
+    <div id="invite-panel" class="invite-panel hidden">
+      <div class="invite-header">
+        <span>🔗 Share Workspace</span>
+        <button onclick="closeInvitePanel()">✕</button>
+      </div>
+      <div class="invite-body">
+        <p>Share this invite code with collaborators:</p>
+        <div class="invite-code-display">
+          <span id="invite-code-show"></span>
+          <button onclick="copyInviteCode()">Copy</button>
+        </div>
+        <button class="regen-btn" onclick="regenerateCode()">Generate New Code</button>
+      </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="context-menu" class="context-menu hidden">
+      <div class="ctx-item" onclick="ctxNewFile()">📄 New File</div>
+      <div class="ctx-item" onclick="ctxNewFolder()">📁 New Folder</div>
+      <div class="ctx-separator"></div>
+      <div class="ctx-item" onclick="ctxRename()">✏️ Rename</div>
+      <div class="ctx-item danger" onclick="ctxDelete()">🗑️ Delete</div>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden file input for uploads -->
+<input type="file" id="upload-folder-input" multiple webkitdirectory style="display:none" onchange="uploadFiles(this)" />
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/dashboard.js"></script>
+<script src="/js/filetree.js"></script>
+<script src="/js/editor.js"></script>
+<script src="/js/socket.js"></script>
+<script src="/js/terminal.js"></script>
+<script src="/js/preview.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
